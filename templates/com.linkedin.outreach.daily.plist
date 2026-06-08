@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.linkedin.outreach.daily.plist — launchd template.
+
+  Replace __RUN_DAILY__ with absolute path to scripts/run_daily.sh,
+  __HOUR__/__MINUTE__ with desired daily run time (local time).
+
+  Install:
+    cp template ~/Library/LaunchAgents/com.linkedin.outreach.daily.plist
+    launchctl load ~/Library/LaunchAgents/com.linkedin.outreach.daily.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.linkedin.outreach.daily</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__RUN_DAILY__</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>__HOUR__</integer>
+    <key>Minute</key>
+    <integer>__MINUTE__</integer>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>/tmp/linkedin-outreach.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/linkedin-outreach.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/opt/anaconda3/bin</string>
+  </dict>
+</dict>
+</plist>

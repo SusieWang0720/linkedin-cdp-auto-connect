@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Local outputs
+.linkedin-outreach/
+linkedin_runs/
+
+# Editor
+.idea/
+.vscode/
