@@ -1,68 +1,73 @@
 # linkedin-cdp-auto-connect
 
-Fully automated LinkedIn outreach starting from just a list of company names.
+> 给一个公司清单，全自动批量发 LinkedIn connect 邀请（每天 ≤ 10 条）。
 
-Discovers each company's likely key person on LinkedIn, generates a personalized
-connect note, and sends ≤10 invites per day on autopilot via [Playwright](https://playwright.dev/python/)
-over the Chrome DevTools Protocol (CDP).
+[English README](./README_EN.md)
 
-Originally packaged as a [WorkBuddy](https://workbuddy.dev) skill, but the scripts
-work standalone on macOS.
+---
 
-## Why CDP?
+只需要一个公司名清单文件（CSV / TXT / XLSX），脚本会：
 
-LinkedIn blocks AppleScript-injected JS clicks (no user-activation), and the
-in-page More → Connect entry is an `<a>` whose `href` is the only path that
-reliably opens the invite modal. Driving real Chrome over CDP makes Playwright's
-clicks count as user events, so the flow goes through.
+1. 自动在 LinkedIn 搜索每家公司的关键负责人（CEO / Founder / CTO / VP / Head of Partnerships ...）
+2. 为每个候选人生成个性化的 connect 招呼语
+3. 通过 [Playwright](https://playwright.dev/python/) + Chrome DevTools Protocol (CDP) 全自动发送邀请
+4. 自动控制每天 ≤ 10 条、随机 35–60 秒间隔，避开 LinkedIn 风控
 
-## Inputs
+最初是作为 [WorkBuddy](https://workbuddy.dev) skill 打包的，但脚本本身在 macOS 上独立可用。
 
-A single file. Examples that all work:
+## 为什么必须走 CDP？
 
-| File              | Format               | First column     |
-| ----------------- | -------------------- | ---------------- |
-| `companies.csv`   | CSV                  | `Aylo`, `MindGeek`, ... |
-| `companies.txt`   | TXT (one per line)   | `Aylo`           |
-| `targets.xlsx`    | XLSX (header optional) | first column = company name |
+LinkedIn 有反自动化机制：
 
-A `templates/companies.csv` sample is included.
+- **AppleScript 注入 JS 调 `.click()`**：不带 user-activation 标记，LinkedIn 直接拒绝弹邀请框
+- **页面右上角"More → Connect"**：实际是个 `<a href="/preload/custom-invite/?vanityName=...">` 链接，点击事件被拦，必须直接 `goto` 这个 href
+- **CDP + Playwright**：派发的是真实浏览器事件，带 user-activation，LinkedIn 才认
 
-## Pipeline
+这套方案是踩了一圈坑后唯一稳定走通的路径。
+
+## 输入：一个公司清单文件
+
+下面三种格式都支持，**只看第一列**：
+
+| 文件名             | 格式                  | 第一列                         |
+| ---------------- | ------------------- | --------------------------- |
+| `companies.csv`  | CSV                 | `Aylo`、`MindGeek`、…         |
+| `companies.txt`  | TXT（一行一个）           | `Aylo`                      |
+| `targets.xlsx`   | XLSX（首行可有可无表头）       | 第一列 = 公司名                   |
+
+仓库自带样例：`templates/companies.csv`。
+
+## 流水线
 
 ```
-companies file ──► find_leads.py ──► queue.jsonl
-                                       │
-                                       ▼
-                                 send_daily.py ──► sent.jsonl + runs/run_*.json
-                                       │
-                                       ▼
-                                  (LinkedIn invite sent with personalized note)
+公司清单文件 ──► find_leads.py ──► queue.jsonl
+                                     │
+                                     ▼
+                               send_daily.py ──► sent.jsonl + runs/run_*.json
+                                     │
+                                     ▼
+                              （LinkedIn 邀请 + 个性化 note 已发送）
 ```
 
-### 1. Launch the dedicated Chrome (one shell command, once per session)
+### 第 1 步：启动专用 Chrome（每个会话一次）
 
 ```bash
 bash scripts/start_chrome.sh
 ```
 
-This opens Chrome with `--remote-debugging-port=9222` against `~/.linkedin-chrome`
-(a dedicated `--user-data-dir`). On the **first** launch you must manually log
-into LinkedIn in that window. After that the profile keeps the session, so
-subsequent runs skip login.
+会用 `--remote-debugging-port=9222` 在 `~/.linkedin-chrome` 这个独立 `--user-data-dir` 上拉起 Chrome。**首次**启动需要在弹出的 Chrome 窗口里手动登录一次 LinkedIn；之后这个 profile 保持登录态，后续运行直接复用。
 
-> Why a dedicated user-data-dir? Chrome refuses `--remote-debugging-port` on
-> the default profile and the port silently 404s.
+> 为什么要用独立 user-data-dir？Chrome 拒绝在默认 profile 上开启远程调试，9222 端口会静默 404。
 
-Verify:
+验证：
 
 ```bash
 curl -s http://127.0.0.1:9222/json/version
 ```
 
-Should return JSON with `Browser`, `Protocol-Version`, `webSocketDebuggerUrl`.
+应返回包含 `Browser`、`Protocol-Version`、`webSocketDebuggerUrl` 的 JSON。
 
-### 2. Discover key-person LinkedIn profiles for every company
+### 第 2 步：为每家公司找出关键人物的 LinkedIn 主页
 
 ```bash
 python scripts/find_leads.py \
@@ -70,23 +75,20 @@ python scripts/find_leads.py \
     --out-dir ~/.linkedin-outreach
 ```
 
-For each company:
+每家公司：
 
-1. Opens `https://www.linkedin.com/search/results/people/?keywords=<Company>`.
-2. Scrapes the visible result list for `/in/<vanity>` links and surrounding text.
-3. Scores each candidate by hits on target titles (`CEO/Founder/CTO/VP/Head of Partnerships/...`)
-   and presence of company name, plus how high they appear.
-4. Writes:
-   - `~/.linkedin-outreach/leads.json` — full ranked candidate pool.
-   - `~/.linkedin-outreach/queue.jsonl` — one line per company with the **top**
-     candidate `{company, name, title, url, vanity, note}` ready to send.
+1. 打开 `https://www.linkedin.com/search/results/people/?keywords=<公司名>`
+2. 抓所有可见的 `/in/<vanity>` 链接和周边文本
+3. 按目标头衔（CEO / Founder / CTO / VP / Head of Partnerships ...）命中、是否含公司名、出现位置打分
+4. 输出：
+   - `~/.linkedin-outreach/leads.json` — 完整候选池（含打分）
+   - `~/.linkedin-outreach/queue.jsonl` — 每家公司一行，**最高分** 候选 `{company, name, title, url, vanity, note}`，准备好发送
 
-Re-running is idempotent: companies already in `queue.jsonl` are skipped.
+可重复执行：已经写进 `queue.jsonl` 的公司会跳过。
 
-You can edit `queue.jsonl` by hand to swap in a better candidate (or to delete
-a row), then continue.
+也可以手动编辑 `queue.jsonl`，换更合适的人或者删掉某行，再继续。
 
-### 3. Send the daily batch (auto-stops at the daily cap)
+### 第 3 步：发送当日批次（自动停在每日上限）
 
 ```bash
 python scripts/send_daily.py \
@@ -94,32 +96,26 @@ python scripts/send_daily.py \
     --daily 10
 ```
 
-What it does:
+它会做的事：
 
-1. Connects to Chrome over CDP.
-2. Loads `queue.jsonl`, skips items already in `sent.jsonl`, and computes how
-   many already went out today.
-3. Sends up to `(--daily − today's count)` invites:
-   - `goto https://www.linkedin.com/preload/custom-invite/?vanityName=<vanity>` —
-     directly opens the invite modal.
-   - Wait for a *visible* `div[role="dialog"]` whose text contains
-     `Add a note to your invitation` (or `How do you know` / `invitation limit`).
-   - Click `Add a note` → fill the textarea with the note → click
-     `Send invitation` (fallback `Send`).
-4. Appends each result to `sent.jsonl` and per-run JSON to `runs/run_<ts>.json`.
-5. Random 35–60s sleep between invites.
+1. 通过 CDP 接管 Chrome
+2. 读 `queue.jsonl`，跳过已经在 `sent.jsonl` 里的，并算出今天已经发过几条
+3. 最多发送 `(--daily − 今天已发数)` 条邀请：
+   - 直接 `goto https://www.linkedin.com/preload/custom-invite/?vanityName=<vanity>`，**唯一**能稳定弹出邀请框的方式
+   - 等待 *可见* 的 `div[role="dialog"]`，且文案包含 `Add a note to your invitation`（或 `How do you know` / `invitation limit`）
+   - 点 `Add a note` → 在 textarea 填入 note → 点 `Send invitation`（兜底 `Send`）
+4. 每条结果 append 到 `sent.jsonl`，整次运行明细写到 `runs/run_<时间戳>.json`
+5. 每条之间随机睡 35–60 秒
 
-Status values you'll see:
+可能看到的状态：
 
-- `sent` + `note_added: true` — invite was actually delivered with the note.
-- `already_pending` — already invited; safely skipped.
-- `requires_email` / `weekly_limit` / `no_invite_dialog` — blocked or
-  rate-limited; not counted as sent.
+- `sent` + `note_added: true` — 邀请已带 note 实际发出
+- `already_pending` — 之前就邀请过，自动跳过
+- `requires_email` / `weekly_limit` / `no_invite_dialog` — 被拦或限流，不计入"已发"
 
-### 4. (Optional) Schedule it daily with launchd
+### 第 4 步：（可选）launchd 每天定时跑
 
-A template is provided at `templates/com.linkedin.outreach.daily.plist`.
-Replace placeholders and install:
+模板：`templates/com.linkedin.outreach.daily.plist`。安装：
 
 ```bash
 SKILL_DIR=$(pwd)
@@ -133,85 +129,69 @@ sed \
 launchctl load ~/Library/LaunchAgents/com.linkedin.outreach.daily.plist
 ```
 
-`scripts/run_daily.sh`:
+`scripts/run_daily.sh` 会：
 
-- Ensures the dedicated Chrome is up (calls `start_chrome.sh`; idempotent).
-- Calls `send_daily.py` with the configured daily cap.
-- Logs to `~/.linkedin-outreach/runs/launchd_<ts>.log`.
+- 确保专用 Chrome 已起（调 `start_chrome.sh`，幂等）
+- 调 `send_daily.py`，按配置的每日上限发
+- 日志写到 `~/.linkedin-outreach/runs/launchd_<时间戳>.log`
 
-To disable:
+停用：
 
 ```bash
 launchctl unload ~/Library/LaunchAgents/com.linkedin.outreach.daily.plist
 ```
 
-> Note: launchd cannot wake macOS from full sleep just to run this. Either keep
-> the Mac awake / on charger, or run the daily script manually.
+立即手动触发一次（不用等到点）：
 
-## File layout under `~/.linkedin-outreach`
+```bash
+launchctl start com.linkedin.outreach.daily
+```
+
+> 注意：macOS **完全休眠** 时 launchd 不会唤醒电脑跑这个任务。建议笔电插着电源，并让屏幕休眠保持在不进入磁盘休眠的档位。
+
+## 输出目录结构 `~/.linkedin-outreach/`
 
 ```
 ~/.linkedin-outreach/
-├── leads.json        # ranked candidate pool from find_leads.py
-├── queue.jsonl       # next-up: 1 line per company (editable)
-├── sent.jsonl        # append-only: 1 line per attempted invite
-└── runs/             # per-invocation JSON logs and launchd shell logs
+├── leads.json        # find_leads.py 产生的全量候选池（已排序）
+├── queue.jsonl       # 待发队列：每家公司一行（可手动编辑）
+├── sent.jsonl        # 仅追加：每次发送的尝试记录
+└── runs/             # 每次运行的 JSON 明细 + launchd shell 日志
 ```
 
-## Repository layout
+## 仓库结构
 
 ```
 linkedin-cdp-auto-connect/
-├── README.md
-├── SKILL.md                                # WorkBuddy skill definition
+├── README.md                                 # 中文说明（默认）
+├── README_EN.md                              # English version
+├── SKILL.md                                  # WorkBuddy skill 元定义
 ├── scripts/
-│   ├── start_chrome.sh                     # launch dedicated Chrome with CDP enabled
-│   ├── find_leads.py                       # discover key-person profiles per company
-│   ├── send_daily.py                       # send the day's invite batch through CDP
-│   ├── run_daily.sh                        # launchd-friendly wrapper
-│   └── cdp_auto_connect.py                 # one-off fixed-list reference script
+│   ├── start_chrome.sh                       # 启动带 CDP 的专用 Chrome
+│   ├── find_leads.py                         # 发现每家公司的关键负责人主页
+│   ├── send_daily.py                         # 通过 CDP 发当天邀请批次
+│   ├── run_daily.sh                          # launchd 包装脚本
+│   └── cdp_auto_connect.py                   # 一次性固定列表参考脚本
 └── templates/
     ├── companies.csv
     └── com.linkedin.outreach.daily.plist
 ```
 
-## Pitfalls
+## 踩坑清单（强烈建议看完再用）
 
-- **Default user-data-dir blocks remote debugging.** Chrome silently logs
-  `DevTools remote debugging requires a non-default data directory` and `:9222`
-  answers HTTP 404. Always use a dedicated dir (`start_chrome.sh` handles this).
-- **AppleScript-driven `.click()` does NOT work.** LinkedIn requires
-  user-activation events; AppleScript-injected JS clicks silently fail to open
-  the invite modal (you only see the hidden video-caption settings dialog).
-  CDP via Playwright is required.
-- **Direct Connect button is rare.** For 1st-degree connections it's `Message`,
-  for many 3rd-degree it's `Follow`. Connect lives inside the "More" dropdown
-  as `<a role="menuitem" href="/preload/custom-invite/?vanityName=…">`.
-  **Skip clicking the menu — `goto` the href.**
-- **Hidden dialogs.** LinkedIn always renders
-  `<div role="dialog" aria-label="Modal Window">` (video player error) and
-  `<div aria-label="Caption Settings Dialog">` even when not displayed.
-  Filter dialogs by `getBoundingClientRect()` width/height > 0 before
-  scanning innerText.
-- **Daily/weekly limits.** LinkedIn caps invites at ~100/week for free
-  accounts. Keep `--daily ≤ 10`. Random 35–60s spacing is the default.
-- **"How do you know X" / email gate.** If LinkedIn requires an email or
-  relationship type, dismiss and skip — never guess.
-- **Note > 200 chars** silently disables the Send button. Free-account note
-  limit is 200 (Premium 300). `find_leads.py` truncates to 200.
-- **Discovery is best-effort.** Some companies (especially low-profile or
-  sensitive industries) won't yield a confident match — `find_leads.py`
-  writes only candidates with non-zero score. Always inspect `queue.jsonl`
-  before launching `send_daily.py` for the first time on a new list.
+- **默认 user-data-dir 不能开远程调试**。Chrome 静默打 `DevTools remote debugging requires a non-default data directory`，9222 直接 404。必须用独立目录（`start_chrome.sh` 已处理）。
+- **AppleScript 派发 `.click()` 一定无效**。LinkedIn 要 user-activation 事件；AppleScript 注入的 click 只会让你看到隐藏的字幕设置 dialog，邀请框不会弹。必须走 CDP + Playwright。
+- **页面上很少有直接的 Connect 按钮**。一度连接显示 `Message`，三度大多显示 `Follow`。Connect 都藏在 "More" 下拉里，是个 `<a role="menuitem" href="/preload/custom-invite/?vanityName=…">`。**别去模拟点菜单 — 直接 `goto` 这个 href。**
+- **隐藏的 dialog 会干扰判断**。LinkedIn 默认就 render 了 `<div role="dialog" aria-label="Modal Window">`（视频播放错误）和 `<div aria-label="Caption Settings Dialog">`，即使不可见。扫 `innerText` 之前先用 `getBoundingClientRect()` 过滤宽高 > 0。
+- **每日/每周上限**。免费账号大约每周 100 条上限。`--daily ≤ 10`，每条 35–60s 随机间隔是默认设置。
+- **"How do you know X" / 邮箱验证弹窗**。LinkedIn 要求填邮箱或关系类型时，关闭并跳过 — 别瞎填。
+- **note 超过 200 字会让 Send 按钮静默禁用**。免费账号 note 上限 200，Premium 300。`find_leads.py` 自动截到 200。
+- **发现是尽力而为**。低调或敏感行业的公司可能找不到高置信度匹配 — `find_leads.py` 只写非零分的候选。**第一次** 在新清单上跑 `send_daily.py` 之前，建议先人工过一遍 `queue.jsonl`。
 
-## Disclaimer
+## 免责声明
 
-LinkedIn's [User Agreement](https://www.linkedin.com/legal/user-agreement)
-forbids automation. This project is provided as a research/educational
-example of CDP-driven browser automation. Use it at your own risk; mass
-outreach can get your account restricted or banned. The defaults are
-intentionally conservative (≤ 10 invites/day, 35–60s random spacing).
+LinkedIn 的 [用户协议](https://www.linkedin.com/legal/user-agreement) 明确禁止自动化。本项目仅作为 CDP 驱动浏览器自动化的研究/教学示例。**风险自负**：批量外联可能导致账号被限制或封禁。默认参数已经做了相对保守的限流（每天 ≤ 10 条邀请，35–60 秒随机间隔）。
 
 ## License
 
-MIT.
+MIT
