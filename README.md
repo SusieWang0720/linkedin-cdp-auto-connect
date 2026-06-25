@@ -37,6 +37,29 @@ LinkedIn 有反自动化机制：
 
 仓库自带样例：`templates/companies.csv`。
 
+## 前置依赖（第一次跑之前必须装）
+
+这个 skill 是**自包含**的，不依赖任何其他 WorkBuddy 浏览器 skill/插件（不需要 `agent-browser`、`playwright-cli` 或 MCP 浏览器 skill）。那些 skill 驱动的是另一个浏览器；本 skill 直接通过 CDP 接管你自己已登录的 Chrome。真正的依赖是系统级的：
+
+| 依赖 | 作用 | 安装 |
+|---|---|---|
+| **Google Chrome**（桌面版） | 被 CDP 接管的浏览器 | google.com/chrome |
+| **Python 3** | 跑脚本 | macOS 自带，或 Anaconda |
+| **playwright**（Python 包） | CDP 自动化库 | `pip install playwright` |
+| **openpyxl**（Python 包） | 读 `.xlsx` 公司清单 | `pip install openpyxl` |
+
+一行装齐：
+
+```bash
+pip install playwright openpyxl
+```
+
+> **不要跑 `playwright install`。** 本 skill 用 `connect_over_cdp` 接管已存在的 Chrome，不用 Playwright 自带的 Chromium，所以不需要下载浏览器那一步。
+>
+> 装了 WorkBuddy 的浏览器 skill ≠ 装了 Python 的 `playwright` 包，两者是不同环境。务必执行上面的 `pip install`。
+>
+> 仅支持 macOS。launchd 定时（第 4 步）不需要额外装东西。
+
 ## 流水线
 
 ```

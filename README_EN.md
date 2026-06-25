@@ -32,6 +32,34 @@ A single file. Examples that all work:
 
 A `templates/companies.csv` sample is included.
 
+## Prerequisites (install before first run)
+
+This skill is **self-contained** — it does NOT depend on any other WorkBuddy
+browser skill/plugin (not `agent-browser`, not `playwright-cli`, not the MCP
+browser skills). Those drive a separate browser; this skill attaches directly to
+your own logged-in Chrome via CDP. The real dependencies are system-level:
+
+| Dependency | Why | Install |
+|---|---|---|
+| **Google Chrome** (desktop) | the browser driven over CDP | google.com/chrome |
+| **Python 3** | runs the scripts | macOS built-in, or Anaconda |
+| **playwright** (Python pkg) | CDP automation library | `pip install playwright` |
+| **openpyxl** (Python pkg) | read `.xlsx` company lists | `pip install openpyxl` |
+
+One-liner:
+
+```bash
+pip install playwright openpyxl
+```
+
+> **Do NOT run `playwright install`.** This skill uses `connect_over_cdp` to
+> attach to an existing Chrome; it does not use Playwright's bundled Chromium,
+> so the browser download step is unnecessary.
+>
+> Having WorkBuddy's browser skills installed does NOT mean the Python
+> `playwright` package is present — that's a separate environment. Always run
+> the `pip install` above. macOS only.
+
 ## Pipeline
 
 ```
